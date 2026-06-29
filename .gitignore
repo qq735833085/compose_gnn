@@ -1,0 +1,40 @@
+# ===== 数据集目录 =====
+initial_dataset/
+valid_dataset/
+problematic_cases/
+merged_data/
+graph_dataset/
+augmented_data/
+
+# ===== 训练产出 =====
+trained_model/
+
+# ===== 可视化输出 =====
+visualization_output/
+merge_checks/
+dataset_analysis/
+
+# ===== 大文件 =====
+*.png
+*.jpg
+
+# ===== Notebook 检查点 =====
+.ipynb_checkpoints/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== 临时文件 =====
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# ===== IDE / 工具配置 =====
+.vscode/
+.claude/
+
+# ===== 生成的报告 =====
+case_quality_report.csv
