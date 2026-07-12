@@ -56,7 +56,7 @@ def data_to_csv(data, nodes_path, edges_path, z_value=0.0):
     """
     x = data.x.cpu().numpy()
     y_node = data.y_node.cpu().numpy().ravel()
-    y_edge = data.y_edge.cpu().numpy().ravel()
+    y_edge = data.y_edge.cpu().numpy()  # 保持原始形状 [2E] 或 [2E, 2]
     edge_index = data.edge_index.cpu().numpy()
 
     N = x.shape[0]
@@ -111,8 +111,18 @@ def data_to_csv(data, nodes_path, edges_path, z_value=0.0):
     edges['start_id'] = edge_index[0, 0::2]
     edges['end_id'] = edge_index[1, 0::2]
 
-    # close_to_psl（取正向边的标签）
-    edges['close_to_psl'] = y_edge[0::2]
+    # PSL 标签（双列：is_psl_1 + is_psl_2）
+    if y_edge.ndim == 2 and y_edge.shape[1] >= 2:
+        edges['is_psl_1'] = y_edge[0::2, 0].astype(int)
+        edges['is_psl_2'] = y_edge[0::2, 1].astype(int)
+        edges['close_to_psl_1'] = 0.0  # 增强后概率值不再保留，填 0
+        edges['close_to_psl_2'] = 0.0
+    else:
+        # 兼容旧格式（单列）
+        edges['is_psl_1'] = y_edge[0::2].astype(int)
+        edges['is_psl_2'] = 0
+        edges['close_to_psl_1'] = 0.0
+        edges['close_to_psl_2'] = 0.0
 
     # ---- 保存 ----
     os.makedirs(os.path.dirname(nodes_path) or '.', exist_ok=True)

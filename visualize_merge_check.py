@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.colors import Normalize
 
-from merge_dual_annotators import (DATA_DIR, OUTPUT_DIR, extract_group_name,
+from merge_dual_annotators import (DATA_DIR, OUTPUT_DIR,
                                      parse_file_pairs, safe_float, clean_type,
                                      merge_nodes, merge_edges,
                                      PSL_STRICT_PTILE, PSL_LOOSE_PTILE)

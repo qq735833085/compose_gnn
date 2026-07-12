@@ -8,20 +8,14 @@ import random
 from datetime import datetime
 from tqdm import tqdm
 
-# 导入所有待测试的模型类（确保路径正确）
+# 导入所有待测试的模型类
 from models.test_models import PureSAGEModel, PureDynamicGATModel, PureGCNModel, PureClassicGATModel
 
 # 导入数据增强模块
 from utils.augment import StressFieldAugmentor, AugmentedGraphList, AUGMENT_CONFIG
 
-
-# ========== 损失函数定义 ==========
-def mse_loss(node_pred, node_true, edge_pred, edge_true, node_weight=1.0, edge_weight=1.0):
-    """节点和边的加权 MSE 损失"""
-    node_loss = torch.nn.functional.mse_loss(node_pred, node_true)
-    edge_loss = torch.nn.functional.mse_loss(edge_pred, edge_true)
-    total_loss = node_weight * node_loss + edge_weight * edge_loss
-    return total_loss, node_loss.item(), edge_loss.item()
+# 导入损失函数
+from loss import MultiTaskStressLoss
 
 
 # ========== 辅助函数：皮尔逊相关系数 ==========
@@ -34,39 +28,64 @@ def pearson_corr(x, y):
     return r_num / r_den if r_den != 0 else 0.0
 
 
-# ========== 验证函数（回归指标） ==========
-def model_val(model, device, val_loader, node_weight=1.0, edge_weight=1.0):
+# ========== 验证函数 ==========
+def model_val(model, device, val_loader, criterion):
     """
-    验证集评估，返回 (平均总损失, MSE, MAE, Pearson相关系数, R²)
+    验证集评估，返回 (loss, sing_auc, psl1_auc, psl2_auc, log_dict)
     """
+    from sklearn.metrics import roc_auc_score
     model.eval()
     total_loss = 0.0
-    all_node_preds = []
-    all_node_labels = []
+    all_sing_preds, all_sing_labels = [], []
+    all_psl1_preds, all_psl1_labels = [], []
+    all_psl2_preds, all_psl2_labels = [], []
 
     with torch.no_grad():
         for batch in val_loader:
             batch = batch.to(device)
-            node_pred, edge_pred = model(batch)                     # (N,1), (E,1)
-            loss, _, _ = mse_loss(node_pred, batch.y_node,
-                                  edge_pred, batch.y_edge,
-                                  node_weight, edge_weight)
+            node_pred, edge_pred = model(batch)  # [N,1], [E,2]
+            loss, log_dict = criterion(node_pred, batch.y_node,
+                                       edge_pred, batch.y_edge)
             total_loss += loss.item()
 
-            all_node_preds.append(node_pred.cpu())
-            all_node_labels.append(batch.y_node.cpu())
+            all_sing_preds.append(node_pred.cpu())
+            all_sing_labels.append(batch.y_node.cpu())
+            all_psl1_preds.append(edge_pred[:, 0:1].cpu())
+            all_psl1_labels.append(batch.y_edge[:, 0:1].cpu())
+            all_psl2_preds.append(edge_pred[:, 1:2].cpu())
+            all_psl2_labels.append(batch.y_edge[:, 1:2].cpu())
 
-    all_node_preds = torch.cat(all_node_preds, dim=0).numpy().ravel()
-    all_node_labels = torch.cat(all_node_labels, dim=0).numpy().ravel()
+    all_sing_preds = torch.cat(all_sing_preds).numpy().ravel()
+    all_sing_labels = torch.cat(all_sing_labels).numpy().ravel()
+    all_psl1_preds = torch.cat(all_psl1_preds).numpy().ravel()
+    all_psl1_labels = torch.cat(all_psl1_labels).numpy().ravel()
+    all_psl2_preds = torch.cat(all_psl2_preds).numpy().ravel()
+    all_psl2_labels = torch.cat(all_psl2_labels).numpy().ravel()
 
-    # 回归指标
-    mse = mean_squared_error(all_node_labels, all_node_preds)
-    mae = mean_absolute_error(all_node_labels, all_node_preds)
-    pearson = pearson_corr(all_node_labels, all_node_preds)
-    r2 = r2_score(all_node_labels, all_node_preds)
+    # AUC（对二分类任务）
+    def safe_auc(y_true, y_pred):
+        if y_true.sum() == 0 or (y_true == 1).all():
+            return 0.5
+        return roc_auc_score(y_true, y_pred)
+
+    sing_auc = safe_auc(all_sing_labels, all_sing_preds)
+    psl1_auc = safe_auc(all_psl1_labels, all_psl1_preds)
+    psl2_auc = safe_auc(all_psl2_labels, all_psl2_preds)
+
+    # Dice 系数
+    def dice(y_true, y_pred, th=0.5):
+        pred_bin = (y_pred > th).astype(int)
+        inter = (pred_bin * y_true).sum()
+        return 2 * inter / (pred_bin.sum() + y_true.sum() + 1e-8)
+
+    sing_dice = dice(all_sing_labels, all_sing_preds)
+    psl1_dice = dice(all_psl1_labels, all_psl1_preds)
+    psl2_dice = dice(all_psl2_labels, all_psl2_preds)
 
     model.train()
-    return total_loss / len(val_loader), mse, mae, pearson, r2
+    return (total_loss / len(val_loader),
+            sing_auc, psl1_auc, psl2_auc,
+            sing_dice, psl1_dice, psl2_dice)
 
 
 # ========== 主训练函数 ==========
@@ -95,7 +114,7 @@ def train_stress_flow(model_class,
     cur_time = datetime.now().strftime("%Y_%m_%d")
     save_dir = os.path.join(save_root, cur_time, model_label)
     os.makedirs(save_dir, exist_ok=True)
-    print(f"▶ 实验开始: {model_label} | 保存路径: {save_dir}")
+    print(f"Experiment: {model_label} | Save: {save_dir}")
 
     # 加载数据集（假设是预处理好的图列表）
     dataset = torch.load(data_path, weights_only=False)
@@ -106,23 +125,24 @@ def train_stress_flow(model_class,
     if use_augmentation:
         augmentor = StressFieldAugmentor(AUGMENT_CONFIG)
         train_dataset = AugmentedGraphList(dataset[:n_train], augmentor)
-        print(f"  运行时增强已启用 (数据集={n_total} 张图)")
+        print(f"  On-the-fly augmentation enabled (n={n_total})")
     else:
-        train_dataset = AugmentedGraphList(dataset[:n_train])  # 无增强（已静态增强）
-        print(f"  使用静态增强数据集 (数据集={n_total} 张图, 无运行时增强)")
+        train_dataset = AugmentedGraphList(dataset[:n_train])
+        print(f"  Static augmented dataset (n={n_total}, no runtime aug)")
 
     val_dataset = AugmentedGraphList(dataset[n_train:])  # 验证集始终无增强
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-    # 初始化模型（输入维度固定为12，因为已丢弃z列）
+    # 初始化模型（输入维度固定为12）
     model = model_class(input_dim=12,
                         hidden_dim1=hidden_dim1,
                         hidden_dim2=hidden_dim2).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = MultiTaskStressLoss()
 
-    best_r2 = -float('inf')   # 用于保存最佳 R² 模型
+    best_psl1_auc = 0.0
     for epoch in range(epochs):
         model.train()
         total_train_loss = 0.0
@@ -132,38 +152,43 @@ def train_stress_flow(model_class,
             batch = batch.to(device)
             optimizer.zero_grad()
             node_pred, edge_pred = model(batch)
-            loss, node_l, edge_l = mse_loss(node_pred, batch.y_node,
-                                            edge_pred, batch.y_edge,
-                                            node_weight, edge_weight)
+            loss, log_dict = criterion(node_pred, batch.y_node,
+                                       edge_pred, batch.y_edge)
             loss.backward()
             optimizer.step()
             total_train_loss += loss.item()
-            loop.set_postfix(loss=loss.item(), node_loss=node_l, edge_loss=edge_l)
+            loop.set_postfix(loss=f'{loss.item():.4f}',
+                            sing=f'{log_dict["sing/total"]:.4f}',
+                            psl1=f'{log_dict["psl1/total"]:.4f}')
 
         avg_train_loss = total_train_loss / len(train_loader)
 
         # 验证
-        val_loss, val_mse, val_mae, val_pearson, val_r2 = model_val(
-            model, device, val_loader, node_weight, edge_weight
+        val_loss, sing_auc, psl1_auc, psl2_auc, sing_dice, psl1_dice, psl2_dice = model_val(
+            model, device, val_loader, criterion
         )
 
         # 记录日志
         log_path = os.path.join(save_dir, 'metrics.csv')
         if not os.path.exists(log_path):
             with open(log_path, 'w') as f:
-                f.write("epoch,train_loss,val_loss,val_mse,val_mae,val_pearson,val_r2\n")
+                f.write("epoch,train_loss,val_loss,sing_auc,psl1_auc,psl2_auc,sing_dice,psl1_dice,psl2_dice\n")
         with open(log_path, 'a') as f:
-            f.write(f"{epoch+1},{avg_train_loss:.6f},{val_loss:.6f},{val_mse:.6f},{val_mae:.6f},{val_pearson:.6f},{val_r2:.6f}\n")
+            f.write(f"{epoch+1},{avg_train_loss:.6f},{val_loss:.6f},{sing_auc:.4f},{psl1_auc:.4f},{psl2_auc:.4f},{sing_dice:.4f},{psl1_dice:.4f},{psl2_dice:.4f}\n")
 
-        # 保存最佳模型（依据 R²）
-        if val_r2 > best_r2:
-            best_r2 = val_r2
+        # 保存最佳模型（依据 PSL1 AUC + PSL2 AUC 均值）
+        avg_psl_auc = (psl1_auc + psl2_auc) / 2
+        if avg_psl_auc > best_psl1_auc:
+            best_psl1_auc = avg_psl_auc
             torch.save(model.state_dict(), os.path.join(save_dir, 'best_model.pth'))
-            print(f"  ✓ 新最佳模型 (R²={val_r2:.4f}) 已保存")
+            print(f"  New best (avg PSL AUC={avg_psl_auc:.4f}) saved")
 
-        print(f"Epoch {epoch+1}: Train Loss={avg_train_loss:.4f} | Val Loss={val_loss:.4f} | R²={val_r2:.4f} | Pearson={val_pearson:.4f}")
+        print(f"Epoch {epoch+1}: Train={avg_train_loss:.4f} Val={val_loss:.4f} | "
+              f"Sing AUC={sing_auc:.3f} Dice={sing_dice:.3f} | "
+              f"PSL1 AUC={psl1_auc:.3f} Dice={psl1_dice:.3f} | "
+              f"PSL2 AUC={psl2_auc:.3f} Dice={psl2_dice:.3f}")
 
-    print(f"✅ 训练完成！最佳验证 R² = {best_r2:.4f}")
+    print(f"Training done. Best PSL AUC={best_psl1_auc:.4f}")
     return model
 
 
@@ -177,14 +202,9 @@ if __name__ == '__main__':
         PureClassicGATModel
     ]
 
-    # ★ 选择数据集：静态增强版（推荐）或原始版
-    # 方式1: 使用静态增强数据集（训练效率高，无需运行时增强）
-    DATA_PATH = r"D:\composite_0602\graph_dataset\20260602_104_pro_augmented_x3.pt"
-    USE_AUG = False  # 数据集已增强，关闭运行时增强
-
-    # 方式2: 使用原始数据集 + 运行时增强（每 epoch 不同变体）
-    # DATA_PATH = r"D:\composite_0602\graph_dataset\20260602_104_pro.pt"
-    # USE_AUG = True
+    # ★ 数据集路径
+    DATA_PATH = r"D:\composite_0602\datasets\03_graph\merged_25cases_augmented_x7.pt"
+    USE_AUG = False  # 静态增强数据集，无需运行时增强
 
     # 公共训练参数
     common_params = {
@@ -193,17 +213,15 @@ if __name__ == '__main__':
         'batch_size': 2,
         'hidden_dim1': 128,
         'hidden_dim2': 64,
-        'node_weight': 1.0,
-        'edge_weight': 0.5,          # 边损失权重可适当降低，因为边数量远多于节点
         'data_path': DATA_PATH,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'save_root': './trained_model',
         'seed': 42,
-        'use_augmentation': USE_AUG,  # ★ 控制是否使用运行时增强
+        'use_augmentation': USE_AUG,
     }
 
     for model_cls in all_models:
         print("\n" + "="*60)
-        print(f"开始训练模型: {model_cls.__name__}")
+        print(f"Start training: {model_cls.__name__}")
         print("="*60)
         train_stress_flow(model_cls, **common_params)

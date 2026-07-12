@@ -27,8 +27,8 @@ from sklearn.neighbors import NearestNeighbors
 # =============================================================================
 # 配置
 # =============================================================================
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'valid_dataset')
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'merged_data')
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'datasets', '01_raw')
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'datasets', '02_merged')
 
 # DBSCAN 参数
 DBSCAN_EPS = 0.05        # 聚类半径（归一化坐标）
@@ -489,15 +489,16 @@ def find_bridge_path(comp_a, comp_b, full_adj, node_prob, node_ids, max_hops):
 
 def prune_dead_branches(edge_df, is_psl, node_df, boundary_eps=BOUNDARY_EPS):
     """
-    迭代剥离 PSL 图中的死分支。
+    修剪 PSL 图中的无效分支。
 
-    规则：应力线必须（满足其一即可）：
+    应力线有效性规则（满足任一即可）：
       A) 端点落在楼板边界上 (x≈0, x≈1, y≈0, y≈1)
       B) 端点落在奇异点上 (is_singularity=1)
-      C) 形成闭环（分量内所有节点度≥2）
+      C) 形成闭环（连通分量内所有节点度 ≥ 2）
 
-    算法：迭代移除不满足以上条件的度=1 节点及其关联边，
-    直到所有度=1 节点均为有效端点或图中无度=1 节点。
+    算法：
+      Phase 1 — 迭代剥离：移除不在边界/奇异点的度=1 端点（去除毛刺）
+      Phase 2 — 分量判定：闭环分量保留；含边界/奇异点的分量保留；其余丢弃
     """
     is_psl = is_psl.copy()
     starts = edge_df['start_id'].values
@@ -506,7 +507,6 @@ def prune_dead_branches(edge_df, is_psl, node_df, boundary_eps=BOUNDARY_EPS):
     y = node_df['y'].values
     is_sing = node_df['is_singularity'].values if 'is_singularity' in node_df.columns else np.zeros(len(node_df))
     node_id_to_idx = {nid: i for i, nid in enumerate(node_df['node_id'].values)}
-    node_idx_to_id = {i: nid for nid, i in node_id_to_idx.items()}
 
     def is_boundary(node_id):
         idx = node_id_to_idx.get(node_id)
@@ -524,71 +524,73 @@ def prune_dead_branches(edge_df, is_psl, node_df, boundary_eps=BOUNDARY_EPS):
     def is_valid_endpoint(node_id):
         return is_boundary(node_id) or is_singularity(node_id)
 
-    # 迭代剥离
+    # ---- Phase 1: 迭代剥离毛刺 ----
     changed = True
-    iteration = 0
     while changed:
         changed = False
-        iteration += 1
-
-        # 构建当前 PSL 子图
         adj = defaultdict(set)
-        edge_of = {}  # (u,v) → edge_idx in edge_df
+        edge_of = {}
         for ei in np.where(is_psl == 1)[0]:
             s, e = starts[ei], ends[ei]
-            adj[s].add(e)
-            adj[e].add(s)
+            adj[s].add(e); adj[e].add(s)
             edge_of[(min(s, e), max(s, e))] = ei
 
         if not adj:
             break
 
-        # 收集要移除的边
         edges_to_remove = set()
-
-        # ① 移除无效的度=1 端点
         for node, neighbors in list(adj.items()):
             if len(neighbors) == 1:
                 if not is_valid_endpoint(node):
-                    # 移除该端点及其唯一边
                     nbr = list(neighbors)[0]
                     ei = edge_of.get((min(node, nbr), max(node, nbr)))
                     if ei is not None:
                         edges_to_remove.add(ei)
 
-        # ② 移除没有有效端点的孤立连通分量
-        visited = set()
-        for node in list(adj.keys()):
-            if node in visited:
-                continue
-            # BFS 收集分量
-            comp = set()
-            q = [node]
-            visited.add(node)
-            while q:
-                u = q.pop(0)
-                comp.add(u)
-                for v in adj[u]:
-                    if v not in visited:
-                        visited.add(v)
-                        q.append(v)
-
-            # 判定分量有效性
-            has_valid = any(is_valid_endpoint(n) for n in comp)
-            is_loop = all(len(adj[n]) >= 2 for n in comp)
-
-            if not has_valid and not is_loop:
-                # 无效分量 → 移除所有边
-                for n in comp:
-                    for nbr in adj[n]:
-                        ei = edge_of.get((min(n, nbr), max(n, nbr)))
-                        if ei is not None:
-                            edges_to_remove.add(ei)
-
         if edges_to_remove:
             for ei in edges_to_remove:
                 is_psl[ei] = 0
             changed = True
+
+    # ---- Phase 2: 分量级判定 ----
+    adj = defaultdict(set)
+    edge_of = {}
+    for ei in np.where(is_psl == 1)[0]:
+        s, e = starts[ei], ends[ei]
+        adj[s].add(e); adj[e].add(s)
+        edge_of[(min(s, e), max(s, e))] = ei
+
+    if not adj:
+        return is_psl
+
+    visited = set()
+    for node in list(adj.keys()):
+        if node in visited:
+            continue
+        comp = set()
+        q = [node]
+        visited.add(node)
+        while q:
+            u = q.pop(0)
+            comp.add(u)
+            for v in adj[u]:
+                if v not in visited:
+                    visited.add(v)
+                    q.append(v)
+
+        # 判定该分量是否有效
+        has_boundary_or_sing = any(is_valid_endpoint(n) for n in comp)
+        is_closed_loop = all(len(adj[n]) >= 2 for n in comp)
+
+        if has_boundary_or_sing or is_closed_loop:
+            continue  # 有效分量，保留
+
+        # 无效分量 → 移除
+        for n in comp:
+            for nbr in adj[n]:
+                ei = edge_of.get((min(n, nbr), max(n, nbr)))
+                if ei is not None:
+                    is_psl[ei] = 0
 
     return is_psl
 
@@ -654,31 +656,24 @@ def process_case(group_name, versions, output_dir):
     # 合并边（仅保留 close_to_psl 原始概率值）
     edge_df = merge_edges(f1_edges, f2_edges, group_name, node_df)
 
-    # ★ 基于节点 is_on_psl 概率场检测 PSL 边（图脊线追踪）
-    print(f'  PSL detection (node probability field):')
-    for set_name, node_col, edge_col in [
-        ('Set1', 'is_on_psl_raw_1', 'is_psl_1'),
-        ('Set2', 'is_on_psl_raw_2', 'is_psl_2')
+    # ★ 基于边 close_to_psl 概率直接确定 PSL 边
+    #   close_to_psl > 0 的边 → is_psl = 1（非零即应力线边）
+    #   然后修剪未到达边界/奇异点/未闭环的游离分支
+    print(f'  PSL detection (edge close_to_psl > 0 → is_psl = 1):')
+    for set_name, edge_prob_col, edge_col in [
+        ('Set1', 'close_to_psl_1', 'is_psl_1'),
+        ('Set2', 'close_to_psl_2', 'is_psl_2')
     ]:
-        # 计算自适应阈值
-        prob = node_df[node_col].values
-        nonzero = prob[prob > 1e-6]
-        T_s = np.percentile(prob, PSL_STRICT_PTILE)
-        T_l = np.percentile(prob, PSL_LOOSE_PTILE)
-        n_core = (prob >= T_s).sum()
-        n_cand = (prob >= T_l).sum()
-        print(f'    {set_name}: T_strict(P{PSL_STRICT_PTILE})={T_s:.4f} ({n_core} core nodes), '
-              f'T_loose(P{PSL_LOOSE_PTILE})={T_l:.4f} ({n_cand} cand nodes)')
-
-        is_psl = determine_psl_edges_from_nodes(node_df, edge_df, node_col)
+        is_psl = (edge_df[edge_prob_col].values > 1e-6).astype(int)
         n_before = is_psl.sum()
+        edge_df[edge_col] = is_psl
 
-        # ★ 修剪死分支：移除未到达边界/奇异点/未闭环的游离分支
-        edge_df[edge_col] = is_psl  # 暂存以便 pruning 使用
+        # 修剪：移除未到达边界/奇异点/未闭环的游离分支
         is_psl_pruned = prune_dead_branches(edge_df, is_psl, node_df)
         edge_df[edge_col] = is_psl_pruned
         n_after = is_psl_pruned.sum()
-        print(f'      → {n_before} edges detected, {n_before - n_after} pruned ({n_after} final)')
+        print(f'    {set_name}: {n_before} nonzero edges → {n_after} after pruning '
+              f'(removed {n_before - n_after} dead branches)')
 
     # ★ 根据已确定的 PSL 边，将节点 is_on_psl 从概率值转为二值
     node_df = convert_node_psl_to_binary(node_df, edge_df, 'is_psl_1', 'is_on_psl_1')

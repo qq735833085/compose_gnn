@@ -1,17 +1,11 @@
 # ===== 数据集目录 =====
-initial_dataset/
-valid_dataset/
-problematic_cases/
-merged_data/
-graph_dataset/
-augmented_data/
+datasets/
 
 # ===== 训练产出 =====
 trained_model/
 
 # ===== 可视化输出 =====
 visualization_output/
-merge_checks/
 dataset_analysis/
 
 # ===== 大文件 =====
@@ -38,3 +32,4 @@ Thumbs.db
 
 # ===== 生成的报告 =====
 case_quality_report.csv
+dataset_overview.json

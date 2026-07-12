@@ -81,16 +81,16 @@ class ParallelHybridStressModel(nn.Module):
             nn.Sigmoid()                                
         )
         
-        # 【8. 边单任务解码器】：拼接两端端点特征（64*2=128维），输出 [close_to_psl概率]
+        # 【8. 边多任务解码器】：拼接两端端点特征（64*2=128维），输出 [is_psl_1, is_psl_2]
         self.edge_decoder = nn.Sequential(
             # 边描述矩阵降维：128 维 -> 32 维
-            nn.Linear(hidden_dim2 * 2, hidden_dim2 // 2), 
+            nn.Linear(hidden_dim2 * 2, hidden_dim2 // 2),
             nn.LeakyReLU(0.2),
             nn.Dropout(0.2),
-            # 输出层：32 维 -> 1 维 (边接近主应力线的概率)
-            nn.Linear(hidden_dim2 // 2, 1),              
+            # 输出层：32 维 -> 2 维 (两套 PSL 边概率)
+            nn.Linear(hidden_dim2 // 2, 2),
             # 门控约束：约束在 [0, 1] 概率区间
-            nn.Sigmoid()                                 
+            nn.Sigmoid()
         )
 
     def forward(self, data):
