@@ -195,11 +195,13 @@ def train_stress_flow(model_class,
 # ========== 批量运行示例 ==========
 if __name__ == '__main__':
     # 选择要训练的模型列表
+    from models.hybrid_parallel_model import ParallelHybridStressModel
     all_models = [
         PureSAGEModel,
         PureDynamicGATModel,
         PureGCNModel,
-        PureClassicGATModel
+        PureClassicGATModel,
+        ParallelHybridStressModel,
     ]
 
     # ★ 数据集路径
