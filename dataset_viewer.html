@@ -3,392 +3,368 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Slab Dataset Viewer — merged_data 交互浏览器</title>
+<title>Slab Dataset Viewer</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;height:100vh;display:flex;flex-direction:column}
-#header{background:#161b22;padding:10px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #30363d;flex-wrap:wrap}
+#header{background:#161b22;padding:10px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #30363d;flex-wrap:wrap}
 #header h1{font-size:17px;color:#58a6ff;white-space:nowrap}
 #header select,#header button{padding:5px 10px;border-radius:5px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;font-size:12px;cursor:pointer}
 #header button:hover,#header select:hover{border-color:#58a6ff}
 #header button.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
 #main{display:flex;flex:1;overflow:hidden}
-#sidebar{width:260px;background:#161b22;padding:12px;overflow-y:auto;border-right:1px solid #30363d;font-size:12px}
-#sidebar h3{color:#58a6ff;margin-bottom:8px;font-size:13px}
+#sidebar{width:270px;background:#161b22;padding:12px;overflow-y:auto;border-right:1px solid #30363d;font-size:12px;flex-shrink:0}
+#sidebar h3{color:#58a6ff;margin-bottom:6px;font-size:13px}
 .stat-r{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #21262d}
 .stat-r .v{color:#7ee787;font-weight:bold}
-#case-list{margin-top:8px;max-height:calc(100vh - 280px);overflow-y:auto}
-.case-item{padding:5px 8px;cursor:pointer;border-radius:3px;margin:1px 0;font-size:11px}
-.case-item:hover{background:#21262d}
-.case-item.sel{background:#1f6feb}
+#graph-list{margin-top:8px;max-height:calc(100vh - 280px);overflow-y:auto}
+.graph-item{padding:5px 8px;cursor:pointer;border-radius:3px;margin:1px 0;font-size:11px;display:flex;justify-content:space-between}
+.graph-item:hover{background:#21262d}
+.graph-item.sel{background:#1f6feb}
 #canvas-wrap{flex:1;position:relative;background:#000;overflow:hidden}
 canvas{display:block}
-#info{position:absolute;top:8px;left:12px;font-size:11px;color:#8b949e;background:rgba(0,0,0,0.7);padding:4px 8px;border-radius:4px}
+#info{position:absolute;top:8px;left:12px;font-size:11px;color:#8b949e;background:rgba(0,0,0,0.75);padding:4px 8px;border-radius:4px}
 #info2{position:absolute;bottom:8px;right:12px;font-size:10px;color:#484f58}
-.legend-bar{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:12px;height:200px;border-radius:6px}
+#hover-tip{position:absolute;background:rgba(0,0,0,0.92);padding:6px 10px;border-radius:5px;font-size:11px;pointer-events:none;display:none;color:#ddd;border:1px solid #444;line-height:1.6;z-index:99}
+#legend-box{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:6px}
+#legend-bar{width:18px;height:220px;border-radius:9px;border:1px solid #555;overflow:hidden}
+#legend-bar canvas{width:100%;height:100%}
+#legend-labels{display:flex;flex-direction:column;justify-content:space-between;height:220px;font-size:10px;color:#999}
 </style>
 </head>
 <body>
 <div id="header">
   <h1>Slab Dataset Viewer</h1>
-  <select id="orig-sel" onchange="onOrigChange()"><option>-- 原始案例 --</option></select>
-  <select id="case-sel" onchange="loadCase()"><option>-- 选择变体 --</option></select>
-  <span style="color:#484f58;font-size:11px">View:</span>
+  <select id="graph-sel" onchange="loadGraph()"><option>-- 选择图 --</option></select>
+  <span style="color:#484f58;font-size:11px">| View:</span>
   <button id="btn-mesh" class="active" onclick="setView('mesh')">网格拓扑</button>
-  <button id="btn-sing" onclick="setView('singularity')">奇异点</button>
-  <button id="btn-psl" onclick="setView('psl')">PSL边</button>
+  <button id="btn-sing" onclick="setView('sing')">奇异点概率</button>
+  <button id="btn-psl1" onclick="setView('psl1')">M1-PSL边</button>
+  <button id="btn-psl2" onclick="setView('psl2')">M2-PSL边</button>
   <button id="btn-stress" onclick="setView('stress')">应力方向</button>
   <button id="btn-m1" onclick="setView('m1')">m1力值</button>
   <button id="btn-m2" onclick="setView('m2')">m2力值</button>
-  <button id="btn-pslnode" onclick="setView('pslnode')">PSL节点</button>
   <span style="color:#484f58;font-size:10px">| 滚轮缩放 · 拖拽平移 · 悬停查看</span>
 </div>
 <div id="main">
   <div id="sidebar">
-    <h3>案例概览</h3>
-    <div id="stats-box">选择案例查看统计</div>
-    <h3 style="margin-top:12px">案例列表</h3>
-    <div id="case-list"></div>
+    <h3>图概览</h3>
+    <div id="stats-box">选择图查看统计</div>
+    <h3 style="margin-top:12px">图列表</h3>
+    <div id="graph-list"></div>
   </div>
   <div id="canvas-wrap">
     <canvas id="c"></canvas>
-    <div class="legend-bar" id="legend"></div>
+    <div id="legend-box">
+      <div id="legend-labels"><span>1.0</span><span>0.5</span><span>0.0</span></div>
+      <div id="legend-bar"><canvas id="legend-canvas"></canvas></div>
+    </div>
     <div id="info"></div>
     <div id="info2"></div>
-    <div id="hover-tip" style="position:absolute;background:rgba(0,0,0,0.9);padding:6px 10px;border-radius:5px;font-size:11px;pointer-events:none;display:none;color:#ddd;border:1px solid #444;line-height:1.6;z-index:99;"></div>
+    <div id="hover-tip"></div>
   </div>
 </div>
 
 <script>
 // ==================== 状态 ====================
-let CASES = [], currentCase = null, currentView = 'mesh';
-let nodesData = null, edgesData = null;
+let GRAPHS = [], currentGraph = null, currentView = 'mesh';
+let nodesData = null, edgesData = null;  // 全量数据
 let nodeMap = {};   // node_id → [x, y]
 let ox = 0, oy = 0, scale = 600;
 let dragging = false, dsx = 0, dsy = 0;
+let hoverEdges = [];
 
 const cnv = document.getElementById('c');
 const ctx = cnv.getContext('2d');
 
-// ==================== 启动 ====================
-let ORIG_GROUPS = {}; // orig_idx → [case indices]
-
+// ==================== 初始化 ====================
 (async function init(){
-  const r = await fetch('/api/cases');
-  CASES = await r.json();
-
-  // 按原始案例分组
-  ORIG_GROUPS = {};
-  CASES.forEach((c,i) => {
-    if(!ORIG_GROUPS[c.orig_idx]) ORIG_GROUPS[c.orig_idx] = [];
-    ORIG_GROUPS[c.orig_idx].push(i);
-  });
-
-  // 填充原始案例选择器
-  const osel = document.getElementById('orig-sel');
-  Object.keys(ORIG_GROUPS).sort((a,b)=>a-b).forEach(k => {
-    osel.innerHTML += `<option value="${k}">Case ${k} (${ORIG_GROUPS[k].length} variants)</option>`;
-  });
-
-  // 默认选第一个
-  if(Object.keys(ORIG_GROUPS).length > 0){
-    osel.value = Object.keys(ORIG_GROUPS)[0];
-    onOrigChange();
-  }
-
-  renderCaseList();
   resizeCanvas();
-  drawLoading('选择案例开始浏览');
+  drawLoading('加载数据集...');
+
+  const r = await fetch('/api/continuous/info');
+  const info = await r.json();
+  GRAPHS = info.cases || [];
+
+  const sel = document.getElementById('graph-sel');
+  GRAPHS.forEach((g, i) => {
+    sel.innerHTML += `<option value="${i}">Graph ${i} | N:${g.n_nodes} E:${g.n_edges} | Sing:${g.sing_nonzero_pct.toFixed(1)}% M1:${g.m1_nonzero_pct.toFixed(1)}% M2:${g.m2_nonzero_pct.toFixed(1)}%</option>`;
+  });
+
+  renderGraphList();
+  if(GRAPHS.length > 0){ sel.value = '0'; loadGraph(); }
+
+  // 绘制色标条
+  drawLegendBar();
 })();
 
-function onOrigChange(){
-  const oidx = document.getElementById('orig-sel').value;
-  const indices = ORIG_GROUPS[oidx] || [];
-  const sel = document.getElementById('case-sel');
-  sel.innerHTML = '';
-  indices.forEach(i => {
-    const c = CASES[i];
-    const label = c.is_original ? 'Original' : `Aug #${c.aug_idx}`;
-    sel.innerHTML += `<option value="${i}">${label}</option>`;
-  });
-  loadCase();
-  renderCaseList();
+function renderGraphList(){
+  const html = GRAPHS.map((g, i) => {
+    const sel = currentGraph && currentGraph.idx === i ? ' sel' : '';
+    return `<div class="graph-item${sel}" onclick="selectGraph(${i})">
+      <span>Graph ${i}</span>
+      <span style="color:#7ee787">M1:${g.m1_mean.toFixed(2)} M2:${g.m2_mean.toFixed(2)}</span></div>`;
+  }).join('');
+  document.getElementById('graph-list').innerHTML = html;
 }
 
-function renderCaseList(){
-  const html = [];
-  for(const [oidx, indices] of Object.entries(ORIG_GROUPS).sort((a,b)=>a[0]-b[0])){
-    html.push(`<div style="color:#58a6ff;font-weight:bold;margin-top:6px;">Case ${oidx}</div>`);
-    for(const i of indices){
-      const c = CASES[i];
-      const label = c.is_original ? 'Orig' : `Aug${c.aug_idx}`;
-      const sel = currentCase && currentCase.name === c.name ? ' sel' : '';
-      html.push(`<div class="case-item${sel}" onclick="selectCase(${i})">${label} | S1:${c.psl1_count} S2:${c.psl2_count}</div>`);
-    }
-  }
-  document.getElementById('case-list').innerHTML = html.join('');
+function selectGraph(i){
+  document.getElementById('graph-sel').value = i;
+  loadGraph();
 }
 
-function getValFromCase(c, key){ return 0; } // placeholder
+async function loadGraph(){
+  const idx = parseInt(document.getElementById('graph-sel').value);
+  if(isNaN(idx)) return;
+  drawLoading(`加载 Graph ${idx}...`);
 
-async function selectCase(i){
-  document.getElementById('case-sel').value = i;
-  // 同步原始案例选择器
-  const c = CASES[i];
-  document.getElementById('orig-sel').value = c.orig_idx;
-  await loadCase();
-  renderCaseList();
-}
+  const r = await fetch(`/api/continuous/graph/${idx}`);
+  const g = await r.json();
 
-async function loadCase(){
-  const i = parseInt(document.getElementById('case-sel').value);
-  if(isNaN(i)) return;
-  currentCase = CASES[i];
-  document.getElementById('info').textContent = `加载中: ${currentCase.name}...`;
-  drawLoading(`加载 ${currentCase.name}...`);
+  currentGraph = g;
+  nodesData = g.nodes;
+  edgesData = g.edges;
 
-  // 并行加载：采样节点 + 采样边 + 完整坐标映射
-  const np = currentCase.nodes_path.replace(/^\//, '');
-  const ep = currentCase.edges_path.replace(/^\//, '');
-  const [nr, er, coordResp] = await Promise.all([
-    fetch(`/api/preview/${np}?n=5000`),
-    fetch(`/api/preview/${ep}?n=4000`),
-    fetch(`/api/preview/${np}?cols=node_id,x,y&n=99999`)
-  ]);
-  nodesData = await nr.json();
-  edgesData = await er.json();
-  const coordData = await coordResp.json();
-
-  // 用完整坐标构建 nodeMap（边端点查找）
+  // nodeMap
   nodeMap = {};
-  for(const r of coordData.sample) nodeMap[getVal(r,'node_id')] = [getVal(r,'x'), getVal(r,'y')];
+  for(const n of nodesData) nodeMap[n.node_id] = [n.x, n.y];
 
-  // 更新侧边栏统计
   renderStats();
-  renderCaseList();
+  renderGraphList();
   resetView();
   draw();
 }
 
+// ==================== 统计面板 ====================
 function renderStats(){
-  if(!nodesData) return;
-  const ns = nodesData.stats||{}, es = edgesData.stats||{};
-  const N = nodesData.total_rows, E = edgesData.total_rows;
-  const nSing = Math.round(ns.is_singularity?.sum || 0);
-  const nPSL1 = Math.round(es.is_psl_1?.sum || 0);
-  const nPSL2 = Math.round(es.is_psl_2?.sum || 0);
-  const pct = (v,t) => t>0 ? (100*v/t).toFixed(1) : '0.0';
+  const N = nodesData.length, E = edgesData.length;
+  const singProbs = nodesData.map(n=>n.sing_prob);
+  const m1Probs = edgesData.map(e=>e.m1_prob||0);
+  const m2Probs = edgesData.map(e=>e.m2_prob||0);
 
-  const html = `
+  const fmt = arr => {
+    const mx = Math.max(...arr), mn = Math.min(...arr);
+    const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
+    return {min:mn, max:mx, mean};
+  };
+  const ss = fmt(singProbs), pm1 = fmt(m1Probs), pm2 = fmt(m2Probs);
+  const singNz = singProbs.filter(v=>v>0.01).length;
+  const m1Nz = m1Probs.filter(v=>v>0.01).length;
+  const m2Nz = m2Probs.filter(v=>v>0.01).length;
+
+  document.getElementById('stats-box').innerHTML = `
     <div style="color:#58a6ff;font-weight:bold;margin:4px 0;font-size:13px">基本统计</div>
     <div class="stat-r"><span>节点 / 边</span><span class="v">${N.toLocaleString()} / ${E.toLocaleString()}</span></div>
-    <div class="stat-r"><span>奇异点</span><span class="v">${nSing} (${pct(nSing,N)}%)</span></div>
-    <div class="stat-r"><span>PSL S1 / S2</span><span class="v">${nPSL1} / ${nPSL2}</span></div>
-
-    <div style="color:#58a6ff;font-weight:bold;margin:10px 0 4px;font-size:13px">m1_abs 分布</div>
-    <canvas id="hist-m1" width="248" height="120" style="background:#0d1117;border-radius:4px;width:100%"></canvas>
-
-    <div style="color:#58a6ff;font-weight:bold;margin:10px 0 4px;font-size:13px">m2_abs 分布</div>
-    <canvas id="hist-m2" width="248" height="120" style="background:#0d1117;border-radius:4px;width:100%"></canvas>
+    <div class="stat-r"><span>Sing max / mean</span><span class="v">${ss.max.toFixed(4)} / ${ss.mean.toFixed(4)}</span></div>
+    <div class="stat-r"><span>Sing >0.01</span><span class="v">${singNz} (${(100*singNz/N).toFixed(1)}%)</span></div>
+    <div class="stat-r"><span style="color:#ff6666">M1-PSL max/mean</span><span class="v">${pm1.max.toFixed(3)} / ${pm1.mean.toFixed(3)}</span></div>
+    <div class="stat-r"><span style="color:#ff6666">M1-PSL >0.01</span><span class="v">${m1Nz} (${(100*m1Nz/E).toFixed(1)}%)</span></div>
+    <div class="stat-r"><span style="color:#6699ff">M2-PSL max/mean</span><span class="v">${pm2.max.toFixed(3)} / ${pm2.mean.toFixed(3)}</span></div>
+    <div class="stat-r"><span style="color:#6699ff">M2-PSL >0.01</span><span class="v">${m2Nz} (${(100*m2Nz/E).toFixed(1)}%)</span></div>
+    <div style="color:#58a6ff;font-weight:bold;margin:10px 0 4px;font-size:13px">Sing概率分布</div>
+    <canvas id="hist-sing" width="248" height="100" style="background:#0d1117;border-radius:4px;width:100%"></canvas>
+    <div style="color:#ff6666;font-weight:bold;margin:8px 0 4px;font-size:12px">M1-PSL分布</div>
+    <canvas id="hist-m1" width="248" height="100" style="background:#0d1117;border-radius:4px;width:100%"></canvas>
+    <div style="color:#6699ff;font-weight:bold;margin:8px 0 4px;font-size:12px">M2-PSL分布</div>
+    <canvas id="hist-m2" width="248" height="100" style="background:#0d1117;border-radius:4px;width:100%"></canvas>
   `;
-  document.getElementById('stats-box').innerHTML = html;
-
-  // 延迟绘制直方图（DOM 更新后）
-  setTimeout(() => drawHistograms(), 50);
+  setTimeout(() => {
+    drawHist('hist-sing', singProbs, '#ff8855');
+    drawHist('hist-m1', m1Probs, '#ff4444');
+    drawHist('hist-m2', m2Probs, '#4488ff');
+  }, 50);
 }
 
-function drawHistograms(){
-  if(!nodesData) return;
-  const ns = nodesData.sample || [];
+function drawHist(cid, vals, color){
+  const c = document.getElementById(cid); if(!c) return;
+  const cx = c.getContext('2d'), W=c.width, H=c.height;
+  cx.clearRect(0,0,W,H);
+  const bins=30, hist=new Array(bins).fill(0);
+  for(const v of vals){ const idx=Math.min(bins-1,Math.floor(v*bins)); hist[idx]++; }
+  const maxH=Math.max(...hist,1), barW=(W-10)/bins;
+  for(let i=0;i<bins;i++){
+    const bh=(hist[i]/maxH)*(H-20);
+    cx.fillStyle=color;cx.globalAlpha=0.6;
+    cx.fillRect(5+i*barW,H-bh-10,barW-1,bh);
+  }
+  cx.fillStyle='#888';cx.font='9px sans-serif';cx.globalAlpha=1;
+  cx.fillText('0',2,H-2); cx.fillText('1',W-16,H-2);
+}
 
-  for(const [col, canvasId, color] of [['m1_abs','hist-m1','#ff6655'],['m2_abs','hist-m2','#5588ff']]){
-    const cnv = document.getElementById(canvasId);
-    if(!cnv) continue;
-    const ctx = cnv.getContext('2d');
-    const W = cnv.width, H = cnv.height;
-    ctx.clearRect(0,0,W,H);
+// ==================== 色标条 ====================
+function probToColor(v){
+  const t=Math.max(0,Math.min(1,v));
+  let r,g,b;
+  if(t<0.2){ const s=t/0.2; r=Math.floor(10+50*s); g=Math.floor(20+120*s); b=Math.floor(100+100*s); }
+  else if(t<0.4){ const s=(t-0.2)/0.2; r=Math.floor(60+100*s); g=Math.floor(140+80*s); b=Math.floor(200-80*s); }
+  else if(t<0.6){ const s=(t-0.4)/0.2; r=Math.floor(160+70*s); g=Math.floor(220-20*s); b=Math.floor(120-90*s); }
+  else if(t<0.8){ const s=(t-0.6)/0.2; r=Math.floor(230+25*s); g=Math.floor(200-140*s); b=Math.floor(30-20*s); }
+  else{ const s=(t-0.8)/0.2; r=Math.floor(255); g=Math.floor(60-60*s); b=Math.floor(10-10*s); }
+  return `rgb(${r},${g},${b})`;
+}
 
-    const vals = ns.map(r => getVal(r, col));
-    const mx = Math.max(...vals, 0.0001);
-    const bins = 30;
-    const hist = new Array(bins).fill(0);
-    for(const v of vals){
-      const idx = Math.min(bins-1, Math.floor(v / mx * bins));
-      hist[idx]++;
-    }
-    const maxH = Math.max(...hist, 1);
-
-    // 柱子
-    const barW = (W - 10) / bins;
-    for(let i=0; i<bins; i++){
-      const bh = (hist[i] / maxH) * (H - 20);
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.7;
-      ctx.fillRect(5 + i*barW, H - bh - 10, barW-1, bh);
-    }
-
-    // 坐标轴标签
-    ctx.fillStyle = '#888'; ctx.font = '9px sans-serif'; ctx.globalAlpha = 1;
-    ctx.fillText('0', 2, H-2);
-    ctx.fillText(mx.toFixed(3), W-28, H-2);
-    const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
-    ctx.fillText(`avg:${avg.toFixed(4)}`, W-62, 12);
+function drawLegendBar(){
+  const lc = document.getElementById('legend-canvas');
+  lc.width=18; lc.height=220;
+  const lctx = lc.getContext('2d');
+  for(let i=0;i<220;i++){
+    lctx.fillStyle=probToColor(i/220);
+    lctx.fillRect(0,219-i,18,1);
   }
 }
 
 // ==================== 视图切换 ====================
 function setView(v){
-  currentView = v;
+  currentView=v;
   document.querySelectorAll('#header button').forEach(b=>b.classList.remove('active'));
   document.getElementById('btn-'+v)?.classList.add('active');
   draw();
 }
 
-// ==================== 绘制 ====================
-function getVal(row, col){ const v=row[col]; return v===undefined||v===''||v==='/'?0:parseFloat(v)||0; }
-
-// 悬停缓存：存储边在屏幕上的线段坐标 + 原始数据
-let hoverEdges = []; // [{sx,sy,ex,ey, edgeData}]
-
+// ==================== 绘制主入口 ====================
 function draw(){
   if(!nodesData||!edgesData) return;
   resizeCanvas();
   ctx.clearRect(0,0,cnv.width,cnv.height);
+  hoverEdges=[];
 
-  const ns = nodesData.sample, es = edgesData.sample;
-
-  // 建立 node_id → [x, y] 映射 (nodeMap 已在 loadCase 中从完整坐标构建)
-  const xs = ns.map(r=>getVal(r,'x')), ys = ns.map(r=>getVal(r,'y'));
-
-  // 清空悬停缓存
-  hoverEdges = [];
+  const ns=nodesData, es=edgesData;
+  const xs=ns.map(n=>n.x), ys=ns.map(n=>n.y);
 
   switch(currentView){
     case 'mesh': drawMesh(xs,ys,es); break;
-    case 'singularity': drawNodeHeat(xs,ys,ns,'is_singularity','hot',es); break;
-    case 'psl': drawPSLEdges(es,ns); break;
+    case 'sing': drawNodeProb(xs,ys,ns,es,'sing_prob'); break;
+    case 'psl1': drawEdgeProbSingle(xs,ys,ns,es,'m1_prob','#ff4444'); break;
+    case 'psl2': drawEdgeProbSingle(xs,ys,ns,es,'m2_prob','#4488ff'); break;
     case 'stress': drawStress(xs,ys,ns,es); break;
-    case 'm1': drawNodeHeat(xs,ys,ns,'m1_abs','viridis',es); break;
-    case 'm2': drawNodeHeat(xs,ys,ns,'m2_abs','viridis',es); break;
-    case 'pslnode': drawPSLNodes(xs,ys,ns,es); break;
+    case 'm1': drawNodeVal(xs,ys,ns,es,'m1_abs'); break;
+    case 'm2': drawNodeVal(xs,ys,ns,es,'m2_abs'); break;
   }
 
-  const c = currentCase;
   document.getElementById('info').innerHTML =
-    `<b>${c.name}</b> | Nodes:${nodesData.total_rows.toLocaleString()} Edges:${edgesData.total_rows.toLocaleString()} | View:${currentView}`;
+    `<b>Graph ${currentGraph.idx}</b> | N:${currentGraph.n_nodes} E:${currentGraph.n_edges} | View:${currentView}`;
   document.getElementById('info2').textContent = `scale:${scale.toFixed(0)}`;
+
+  // 色标条：概率视图显示，力值视图隐藏
+  const showLegend = ['sing','psl1','psl2'].includes(currentView);
+  document.getElementById('legend-box').style.display = showLegend?'flex':'none';
 }
 
+// ==================== 坐标 ====================
 function toXY(x,y){ return [ox+x*scale, oy+(1-y)*scale]; }
 function getNodeXY(nid){ return nodeMap[nid] || [0.5,0.5]; }
+function storeEdge(sx,sy,ex,ey,e){ hoverEdges.push({sx,sy,ex,ey,data:e}); }
 
-// 存储边线段（用于悬停检测）
-function storeEdgeForHover(sx,sy,ex,ey, e){
-  hoverEdges.push({sx,sy,ex,ey, data:e});
-}
+// ==================== 各视图绘制 ====================
 
-function pointToSegDist(px,py, x1,y1, x2,y2){
-  const dx=x2-x1, dy=y2-y1;
-  const len2=dx*dx+dy*dy;
-  if(len2<1e-9) return Math.hypot(px-x1,py-y1);
-  let t=((px-x1)*dx+(py-y1)*dy)/len2;
-  t=Math.max(0,Math.min(1,t));
-  return Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
-}
-
+// ---- 网格拓扑 ----
 function drawMesh(xs,ys,es){
+  // 边
   ctx.strokeStyle='rgba(60,65,75,0.18)';ctx.lineWidth=0.4;ctx.beginPath();
   for(const e of es){
-    const [sx,sy]=toXY(...getNodeXY(getVal(e,'start_id')));
-    const [ex,ey]=toXY(...getNodeXY(getVal(e,'end_id')));
+    const [sx,sy]=toXY(...getNodeXY(e.start_id));
+    const [ex,ey]=toXY(...getNodeXY(e.end_id));
     ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);
   }
   ctx.stroke();
-  ctx.fillStyle='rgba(100,160,255,0.4)';
-  for(let i=0;i<xs.length;i++){const[p,q]=toXY(xs[i],ys[i]);ctx.fillRect(p-0.6,q-0.6,1.2,1.2);}
-}
-
-function drawNodeHeat(xs,ys,ns,col,cmap,es){
-  drawMesh(xs,ys,es);
-  const vals=ns.map(r=>getVal(r,col)); const mx=Math.max(...vals,0.01);
+  // 节点
+  ctx.fillStyle='rgba(100,160,255,0.5)';
   for(let i=0;i<xs.length;i++){
-    const[p,q]=toXY(xs[i],ys[i]); const v=Math.min(vals[i]/mx,1);
-    let r,g,b;
-    if(cmap==='hot'){ r=Math.floor(255*v); g=Math.floor(100*(1-v)); b=Math.floor(50*(1-v)); }
-    else{ r=Math.floor(60+195*v); g=Math.floor(200*(1-v)); b=Math.floor(80+100*(1-v)); }
-    ctx.fillStyle=`rgba(${r},${g},${b},0.7)`;ctx.fillRect(p-1.3,q-1.3,2.6,2.6);
+    const[p,q]=toXY(xs[i],ys[i]);
+    ctx.fillRect(p-0.6,q-0.6,1.2,1.2);
   }
 }
 
-function drawPSLEdges(es){
-  // —— 先画所有背景边（灰色） ——
-  ctx.strokeStyle='rgba(40,45,50,0.08)';ctx.lineWidth=0.3;ctx.beginPath();
+// ---- 节点概率（奇异点） ----
+function drawNodeProb(xs,ys,ns,es,field){
+  // 灰底网格
+  ctx.strokeStyle='rgba(40,45,50,0.08)';ctx.lineWidth=0.25;ctx.beginPath();
   for(const e of es){
-    const[sx,sy]=toXY(...getNodeXY(getVal(e,'start_id')));
-    const[ex,ey]=toXY(...getNodeXY(getVal(e,'end_id')));
+    const [sx,sy]=toXY(...getNodeXY(e.start_id));
+    const [ex,ey]=toXY(...getNodeXY(e.end_id));
     ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);
   }
   ctx.stroke();
+  // 节点色块
+  for(let i=0;i<xs.length;i++){
+    const[p,q]=toXY(xs[i],ys[i]);
+    const v=ns[i][field];
+    ctx.fillStyle=probToColor(v);
+    ctx.fillRect(p-1.5,q-1.5,3,3);
+  }
+}
 
-  // —— PSL Set1 (红色) + Set2 (蓝色) 叠加 ——
-  const sets = [
-    ['is_psl_1','#ff4444',1.8],
-    ['is_psl_2','#4488ff',1.8]
-  ];
-  for(const [col,color,lw] of sets){
-    ctx.strokeStyle=color;ctx.lineWidth=lw;ctx.globalAlpha=0.85;ctx.beginPath();
-    let count=0;
-    for(const e of es){
-      if(getVal(e,col)<0.5) continue;
-      const[sx,sy]=toXY(...getNodeXY(getVal(e,'start_id')));
-      const[ex,ey]=toXY(...getNodeXY(getVal(e,'end_id')));
-      ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);
-      storeEdgeForHover(sx,sy,ex,ey, e);  // ★ 存储用于悬停
-      count++;
-    }
-    ctx.stroke();
-    console.log(`  PSL ${col}: ${count} edges drawn`);
+// ---- 单通道 PSL 边概率 ----
+function drawEdgeProbSingle(xs,ys,ns,es,field,baseColor){
+  // 灰底网格
+  ctx.strokeStyle='rgba(40,45,50,0.06)';ctx.lineWidth=0.2;ctx.beginPath();
+  for(const e of es){
+    const [sx,sy]=toXY(...getNodeXY(e.start_id));
+    const [ex,ey]=toXY(...getNodeXY(e.end_id));
+    ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);
+  }
+  ctx.stroke();
+  // 概率边
+  for(const e of es){
+    const v=e[field]||0;
+    if(v<0.005) continue;
+    const [sx,sy]=toXY(...getNodeXY(e.start_id));
+    const [ex,ey]=toXY(...getNodeXY(e.end_id));
+    const t=Math.min(v,1);
+    ctx.strokeStyle=probToColor(t);
+    ctx.lineWidth=0.5+3.0*t;
+    ctx.globalAlpha=0.4+0.6*t;
+    ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);ctx.stroke();
+    if(v>0.05) storeEdge(sx,sy,ex,ey,e);
   }
   ctx.globalAlpha=1;
 }
 
-function drawStress(xs,ys,ns,es){
-  drawMesh(xs,ys,es);
-  const step=Math.max(1,Math.floor(xs.length/500));
-  for(let i=0;i<xs.length;i+=step){
-    const[p,q]=toXY(xs[i],ys[i]); const len=scale*0.01;
-    const m1vx=getVal(ns[i],'m1_vx'),m1vy=getVal(ns[i],'m1_vy');
-    const m2vx=getVal(ns[i],'m2_vx'),m2vy=getVal(ns[i],'m2_vy');
-    if(Math.abs(m1vx)>1e-6||Math.abs(m1vy)>1e-6){
-      ctx.strokeStyle='#ff5555';ctx.lineWidth=1.1;ctx.beginPath();
-      ctx.moveTo(p,q);ctx.lineTo(p+m1vx*len,q-m1vy*len);ctx.stroke();
-    }
-    if(Math.abs(m2vx)>1e-6||Math.abs(m2vy)>1e-6){
-      ctx.strokeStyle='#5588ff';ctx.lineWidth=1.1;ctx.beginPath();
-      ctx.moveTo(p,q);ctx.lineTo(p+m2vx*len,q-m2vy*len);ctx.stroke();
-    }
+// ---- 节点标量值（m1/m2力值） ----
+function drawNodeVal(xs,ys,ns,es,field){
+  // 灰底网格
+  ctx.strokeStyle='rgba(40,45,50,0.08)';ctx.lineWidth=0.25;ctx.beginPath();
+  for(const e of es){
+    const [sx,sy]=toXY(...getNodeXY(e.start_id));
+    const [ex,ey]=toXY(...getNodeXY(e.end_id));
+    ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);
   }
-}
-
-function drawPSLNodes(xs,ys,ns,es){
-  drawMesh(xs,ys,es);
-  const psl1=ns.map(r=>getVal(r,'is_on_psl_1'));
-  const psl2=ns.map(r=>getVal(r,'is_on_psl_2'));
+  ctx.stroke();
+  // 归一化到 [0,1] 再映射颜色
+  const vals=ns.map(n=>n[field]||0);
+  const mx=Math.max(...vals,0.001);
   for(let i=0;i<xs.length;i++){
-    const[p,q]=toXY(xs[i],ys[i]); const s=3;
-    if(psl1[i]>=1&&psl2[i]>=1) ctx.fillStyle='#ff44ff';
-    else if(psl1[i]>=1) ctx.fillStyle='#ff4444';
-    else if(psl2[i]>=1) ctx.fillStyle='#4488ff';
-    else continue;
-    ctx.fillRect(p-s/2,q-s/2,s,s);
+    const[p,q]=toXY(xs[i],ys[i]);
+    const v=Math.min(vals[i]/mx,1);
+    ctx.fillStyle=probToColor(v);
+    ctx.fillRect(p-1.3,q-1.3,2.6,2.6);
   }
 }
 
-function drawLoading(msg){
-  resizeCanvas();
-  ctx.fillStyle='#58a6ff';ctx.font='18px sans-serif';ctx.textAlign='center';
-  ctx.fillText(msg,cnv.width/2,cnv.height/2);
-  ctx.textAlign='start';
+// ---- 应力方向 ----
+function drawStress(xs,ys,ns,es){
+  // 灰底网格
+  ctx.strokeStyle='rgba(40,45,50,0.08)';ctx.lineWidth=0.25;ctx.beginPath();
+  for(const e of es){
+    const [sx,sy]=toXY(...getNodeXY(e.start_id));
+    const [ex,ey]=toXY(...getNodeXY(e.end_id));
+    ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);
+  }
+  ctx.stroke();
+  // 方向箭头
+  const step=Math.max(1,Math.floor(xs.length/500));
+  const len=scale*0.012;
+  for(let i=0;i<xs.length;i+=step){
+    const n=ns[i]; const [p,q]=toXY(xs[i],ys[i]);
+    if(Math.abs(n.m1_vx)>1e-6||Math.abs(n.m1_vy)>1e-6){
+      ctx.strokeStyle='#ff5555';ctx.lineWidth=1.1;ctx.beginPath();
+      ctx.moveTo(p,q);ctx.lineTo(p+n.m1_vx*len,q-n.m1_vy*len);ctx.stroke();
+    }
+    if(Math.abs(n.m2_vx)>1e-6||Math.abs(n.m2_vy)>1e-6){
+      ctx.strokeStyle='#5588ff';ctx.lineWidth=1.1;ctx.beginPath();
+      ctx.moveTo(p,q);ctx.lineTo(p+n.m2_vx*len,q-n.m2_vy*len);ctx.stroke();
+    }
+  }
 }
 
 // ==================== Canvas ====================
@@ -396,10 +372,15 @@ function resizeCanvas(){
   const wrap=document.getElementById('canvas-wrap');
   cnv.width=wrap.clientWidth;cnv.height=wrap.clientHeight;
 }
-
 function resetView(){
   scale=Math.min(cnv.width,cnv.height)*0.82;
   ox=cnv.width/2-scale/2;oy=cnv.height/2-scale/2;
+}
+function drawLoading(msg){
+  resizeCanvas();
+  ctx.fillStyle='#58a6ff';ctx.font='18px sans-serif';ctx.textAlign='center';
+  ctx.fillText(msg,cnv.width/2,cnv.height/2);
+  ctx.textAlign='start';
 }
 
 // ==================== 交互 ====================
@@ -412,36 +393,31 @@ cnv.addEventListener('wheel',e=>{
 },{passive:false});
 
 cnv.addEventListener('mousedown',e=>{dragging=true;dsx=e.offsetX;dsy=e.offsetY;});
+
 cnv.addEventListener('mousemove',e=>{
   if(dragging){ox+=e.offsetX-dsx;oy+=e.offsetY-dsy;dsx=e.offsetX;dsy=e.offsetY;draw();return;}
 
-  // 悬停检测：找最近的边
   const mx=e.offsetX, my=e.offsetY;
-  let bestDist=12, bestEdge=null;  // 12px 检测半径
+  let bestDist=12, bestEdge=null;
   for(const he of hoverEdges){
-    const d=pointToSegDist(mx,my, he.sx,he.sy, he.ex,he.ey);
-    if(d<bestDist){ bestDist=d; bestEdge=he; }
+    const d=pointToSegDist(mx,my,he.sx,he.sy,he.ex,he.ey);
+    if(d<bestDist){bestDist=d;bestEdge=he;}
   }
-
   const tt=document.getElementById('hover-tip');
   if(bestEdge){
     const e=bestEdge.data;
-    const sid=getVal(e,'start_id'), eid=getVal(e,'end_id');
-    const cp1=getVal(e,'close_to_psl_1'), cp2=getVal(e,'close_to_psl_2');
-    const ip1=getVal(e,'is_psl_1'), ip2=getVal(e,'is_psl_2');
-    tt.innerHTML = `
-      <b>Edge</b> #${getVal(e,'edge_id')}<br>
-      Nodes: ${sid} → ${eid}<br>
-      <span style="color:#ff6666">is_psl1: ${ip1}</span> | cpsl1: ${cp1.toFixed(4)}<br>
-      <span style="color:#6699ff">is_psl2: ${ip2}</span> | cpsl2: ${cp2.toFixed(4)}
-    `;
-    tt.style.display='block';
-    tt.style.left=(mx+18)+'px'; tt.style.top=(my-10)+'px';
-  } else {
-    tt.style.display='none';
-  }
+    tt.innerHTML=`<b>Edge</b> #${e.edge_id}<br>Nodes: ${e.start_id}→${e.end_id}<br><span style="color:#ff6666">M1-PSL: ${(e.m1_prob||0).toFixed(6)}</span><br><span style="color:#6699ff">M2-PSL: ${(e.m2_prob||0).toFixed(6)}</span>`;
+    tt.style.display='block';tt.style.left=(mx+18)+'px';tt.style.top=(my-10)+'px';
+  }else{tt.style.display='none';}
 });
 
+function pointToSegDist(px,py,x1,y1,x2,y2){
+  const dx=x2-x1,dy=y2-y1,len2=dx*dx+dy*dy;
+  if(len2<1e-9) return Math.hypot(px-x1,py-y1);
+  let t=((px-x1)*dx+(py-y1)*dy)/len2;
+  t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(x1+t*dx),py-(y1+t*dy));
+}
 cnv.addEventListener('mouseup',()=>dragging=false);
 cnv.addEventListener('mouseleave',()=>{dragging=false;document.getElementById('hover-tip').style.display='none';});
 window.addEventListener('resize',()=>{resizeCanvas();draw();});
