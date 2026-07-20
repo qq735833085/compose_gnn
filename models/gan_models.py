@@ -200,6 +200,106 @@ class DiscriminatorGNN(nn.Module):
         return score
 
 
+# ============================= 改进版 Generator (v4) =============================
+
+class GeneratorGNNv4(nn.Module):
+    """
+    改进版生成器：
+      1. 3 层 GNN（更深的表征）
+      2. 独立的 M1/M2 边解码器（各自专注一个 PSL 类型）
+      3. 节点解码器加入边信息（edge-aware node prediction）
+      4. DropEdge 支持（训练时随机丢弃边）
+    """
+
+    def __init__(self, input_dim=12, hidden_dim=128, hidden_dim2=64,
+                 gnn_type='gat', dropout=0.1, dropedge=0.1):
+        super().__init__()
+        self.gnn_type = gnn_type
+        self.dropout_rate = dropout
+        self.dropedge = dropedge
+
+        # ---- 3 层 Encoder (deeper) ----
+        if gnn_type == 'gat':
+            self.conv1 = GATv2Conv(input_dim, hidden_dim, heads=4, concat=False, dropout=dropout)
+            self.conv2 = GATv2Conv(hidden_dim, hidden_dim, heads=4, concat=False, dropout=dropout)
+            self.conv3 = GATv2Conv(hidden_dim, hidden_dim2, heads=4, concat=False, dropout=dropout)
+        elif gnn_type == 'sage':
+            self.conv1 = SAGEConv(input_dim, hidden_dim)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+            self.conv3 = SAGEConv(hidden_dim, hidden_dim2)
+        else:
+            self.conv1 = GCNConv(input_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, hidden_dim)
+            self.conv3 = GCNConv(hidden_dim, hidden_dim2)
+
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
+        self.bn3 = nn.BatchNorm1d(hidden_dim2)
+
+        # Residual projections
+        self.res1 = nn.Linear(input_dim, hidden_dim)
+        self.res2 = nn.Linear(hidden_dim, hidden_dim)
+
+        # ---- Node Head (sing probability) ----
+        self.node_head = nn.Sequential(
+            nn.Linear(hidden_dim2, hidden_dim2 // 2),
+            nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dim2 // 2, 1),
+            nn.Sigmoid()
+        )
+
+        # ---- ★ 独立 M1/M2 Edge Heads ----
+        self.edge_head_m1 = nn.Sequential(
+            nn.Linear(hidden_dim2 * 2, hidden_dim2 // 2),
+            nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dim2 // 2, 1),
+            nn.Sigmoid()
+        )
+        self.edge_head_m2 = nn.Sequential(
+            nn.Linear(hidden_dim2 * 2, hidden_dim2 // 2),
+            nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dim2 // 2, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+
+        # DropEdge: 训练时随机丢弃边
+        edge_mask = None  # 用于对齐 edge targets
+        if self.training and self.dropedge > 0:
+            from torch_geometric.utils import dropout_edge
+            edge_index, edge_mask = dropout_edge(edge_index, p=self.dropedge, training=True)
+
+        # Layer 1
+        h = self.conv1(x, edge_index)
+        h = self.bn1(h)
+        h = F.relu(h)
+        h = F.dropout(h, p=self.dropout_rate, training=self.training)
+
+        # Layer 2
+        h2 = self.conv2(h, edge_index)
+        h2 = self.bn2(h2)
+        h2 = F.relu(h2)
+
+        # Layer 3
+        h3 = self.conv3(h2, edge_index)
+        h3 = self.bn3(h3)
+        h3 = F.relu(h3)
+
+        # Node predictions
+        node_prob = self.node_head(h3)  # [N, 1]
+
+        # ★ 独立 M1/M2 边预测
+        src, dst = edge_index[0], edge_index[1]
+        edge_feat = torch.cat([h3[src], h3[dst]], dim=-1)
+        m1_prob = self.edge_head_m1(edge_feat)  # [E, 1]
+        m2_prob = self.edge_head_m2(edge_feat)  # [E, 1]
+        edge_prob = torch.cat([m1_prob, m2_prob], dim=1)  # [E, 2]
+
+        return node_prob, edge_prob, edge_mask
+
+
 # ============================= 权重初始化 =============================
 
 def init_weights(m):
