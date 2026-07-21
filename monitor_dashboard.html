@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compose-GNN Training Monitor</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card-bg: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d2991d;
+    --red: #f85149;
+    --purple: #a371f7;
+    --orange: #f0883e;
+    --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 20px; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 8px; margin-bottom: 16px;
+    flex-wrap: wrap; gap: 8px;
+  }
+  .header h1 { font-size: 1.3rem; color: var(--accent); }
+  .header .status { font-size: 0.85rem; color: var(--text-dim); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--green); }
+  .dot.idle { background: var(--yellow); }
+
+  .summary {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 16px;
+  }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px;
+  }
+  .card .label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .card .value { font-size: 1.5rem; font-weight: 600; margin-top: 4px; }
+  .card .sub  { font-size: 0.78rem; color: var(--text-dim); margin-top: 2px; }
+  .value.green { color: var(--green); } .value.yellow { color: var(--yellow); }
+  .value.accent { color: var(--accent); } .value.purple { color: var(--purple); }
+  .value.orange { color: var(--orange); }
+
+  .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+  .grid-1col-full { margin-bottom: 16px; }
+
+  @media (max-width: 1200px) {
+    .grid-2col { grid-template-columns: 1fr; }
+    .grid-3col { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 768px) {
+    .grid-3col { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  .panel-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    font-size: 0.85rem; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 4px;
+  }
+  .panel-body { padding: 12px 16px; }
+
+  .chart-container { position: relative; width: 100%; }
+  .chart-container canvas { display: block; max-width: 100%; }
+
+  .exp-row {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .exp-row:hover { background: rgba(255,255,255,0.03); }
+  .exp-row:last-child { border-bottom: none; }
+  .exp-row.selected { background: rgba(88,166,255,0.06); }
+
+  .arch-badge {
+    font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+    text-transform: uppercase; min-width: 56px; text-align: center;
+  }
+  .badge-gat  { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .badge-gcn  { background: rgba(163,113,247,0.15); color: var(--purple); }
+  .badge-sage { background: rgba(57,210,192,0.15); color: var(--cyan); }
+  .badge-phys { background: rgba(240,136,62,0.15); color: var(--orange); }
+  .badge-done { background: rgba(63,185,80,0.12); color: var(--green); }
+
+  .exp-row .info { flex: 1; min-width: 0; }
+  .exp-row .info .title { font-size: 0.85rem; font-weight: 500; }
+  .exp-row .info .detail { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+
+  .progress-wrap { width: 160px; }
+  .progress-outer { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .progress-inner { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .progress-inner.active { background: linear-gradient(90deg, var(--accent), var(--purple)); }
+  .progress-inner.done { background: var(--green); }
+  .pct { font-size: 0.78rem; font-weight: 600; min-width: 38px; text-align: right; }
+
+  .tag {
+    font-size: 0.65rem; font-weight: 700; padding: 3px 8px; border-radius: 10px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .tag-active { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .tag-done { background: rgba(63,185,80,0.12); color: var(--green); }
+  .tag-wait { background: rgba(139,148,158,0.1); color: var(--text-dim); }
+
+  .chart-tabs { display: flex; gap: 4px; }
+  .chart-tab {
+    font-size: 0.7rem; padding: 4px 12px; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+  }
+  .chart-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .compare-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .compare-table th {
+    text-align: left; padding: 8px 12px; color: var(--text-dim);
+    font-weight: 500; border-bottom: 1px solid var(--border);
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .compare-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .compare-table tr.best { background: rgba(88,166,255,0.04); }
+
+  .rank-badge {
+    display: inline-block; width: 22px; height: 22px; line-height: 22px;
+    text-align: center; border-radius: 50%; font-size: 0.7rem; font-weight: 700;
+  }
+  .rank-1 { background: rgba(212,153,29,0.2); color: var(--yellow); }
+  .rank-2 { background: rgba(139,148,158,0.15); color: var(--text-dim); }
+  .rank-3 { background: rgba(240,136,62,0.12); color: var(--orange); }
+
+  .refresh-bar {
+    text-align: center; padding: 8px; font-size: 0.72rem; color: var(--text-dim);
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+    margin-top: 16px;
+  }
+  .click-hint { font-size: 0.7rem; color: var(--text-dim); font-style: italic; }
+
+  .error-msg {
+    padding: 8px 12px; margin: 8px 0; background: rgba(248,81,73,0.1);
+    border: 1px solid rgba(248,81,73,0.3); border-radius: 4px;
+    color: var(--red); font-size: 0.8rem; display: none;
+  }
+  .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#9881; Compose-GNN Training Monitor</h1>
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Loading...</span> &nbsp;|&nbsp;
+    Updated: <span id="lastUpdate">--</span> &nbsp;|&nbsp;
+    Refresh: <span id="countdown">10s</span>
+  </div>
+</div>
+
+<div class="summary" id="summaryCards"></div>
+<div id="errorBox" class="error-msg"></div>
+
+<div class="grid-2col">
+  <div class="panel">
+    <div class="panel-header">
+      <span>&#9776; Experiments</span>
+      <span class="click-hint">Click to select & view charts</span>
+    </div>
+    <div id="expList" style="max-height: 380px; overflow-y: auto;">
+      <div class="loading">Loading experiments...</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span>&#9783; Training Curves: <span id="chartExpName" style="color:var(--accent);">--</span></span>
+      <div class="chart-tabs" id="chartTabs">
+        <button class="chart-tab active" data-view="loss">Loss</button>
+        <button class="chart-tab" data-view="sing">Sing</button>
+        <button class="chart-tab" data-view="edge">Edge</button>
+        <button class="chart-tab" data-view="m1m2">M1/M2</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="chart-container" style="height:300px;">
+        <canvas id="mainChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-3col">
+  <div class="panel">
+    <div class="panel-header"><span>D Loss vs G Loss</span></div>
+    <div class="panel-body">
+      <div class="chart-container" style="height:200px;"><canvas id="lossChart"></canvas></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><span>Recon vs Adversarial</span></div>
+    <div class="panel-body">
+      <div class="chart-container" style="height:200px;"><canvas id="reconChart"></canvas></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><span>R1 Gradient Penalty</span></div>
+    <div class="panel-body">
+      <div class="chart-container" style="height:200px;"><canvas id="r1Chart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel grid-1col-full">
+  <div class="panel-header"><span>&#9878; Architecture Comparison</span></div>
+  <div style="overflow-x:auto;">
+    <table class="compare-table" id="compareTable">
+      <thead><tr><th>#</th><th>Arch</th><th>Experiment</th><th>Epoch</th><th>Sing AUC</th><th>Sing Dice</th><th>Edge AUC</th><th>Edge Dice</th><th>M1 Dice</th><th>M2 Dice</th><th>Status</th></tr></thead>
+      <tbody><tr><td colspan="11" style="text-align:center;padding:20px;color:var(--text-dim);">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="refresh-bar">
+  Auto-refresh every <strong>10s</strong> &bull;
+  Server: <span id="serverUrl">http://127.0.0.1:8080</span> &bull;
+  <kbd>F5</kbd> to force refresh
+</div>
+
+<script src="/chart.umd.min.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  var API_BASE = window.location.origin;
+  var REFRESH_MS = 10000;
+  var COLORS = {
+    d_loss: '#f85149', g_loss: '#58a6ff', recon: '#d2991d', adv: '#f0883e', r1: '#8b949e',
+    sing_auc: '#3fb950', sing_dice: '#a371f7',
+    edge_auc: '#39d2c0', edge_dice: '#f0883e',
+    m1_auc: '#58a6ff', m1_dice: '#a371f7',
+    m2_auc: '#3fb950', m2_dice: '#d2991d'
+  };
+
+  var experiments = [];
+  var selectedExpId = null;
+  var charts = {};
+  var countdown = REFRESH_MS / 1000;
+
+  function showError(msg) {
+    var el = document.getElementById('errorBox');
+    if (el) { el.textContent = 'ERROR: ' + msg; el.style.display = 'block'; }
+    console.error(msg);
+  }
+  function clearError() {
+    var el = document.getElementById('errorBox');
+    if (el) el.style.display = 'none';
+  }
+
+  // ==================== Chart helpers ====================
+  function destroyChart(key) {
+    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+  }
+
+  function makeChart(key, datasets, yLabel, yMin, yMax) {
+    destroyChart(key);
+    var canvas = document.getElementById(key);
+    if (!canvas) { showError('Canvas #' + key + ' not found'); return null; }
+
+    var ctx = canvas.getContext('2d');
+    var chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: { color: '#c9d1d9', boxWidth: 12, padding: 10, usePointStyle: true, font: { size: 10 } }
+          },
+          tooltip: {
+            backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+            titleColor: '#c9d1d9', bodyColor: '#c9d1d9'
+          }
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'Epoch', color: '#8b949e' },
+            grid: { color: '#21262d' },
+            ticks: { color: '#8b949e', maxTicksLimit: 10 }
+          },
+          y: {
+            title: { display: true, text: yLabel, color: '#8b949e' },
+            grid: { color: '#21262d' },
+            ticks: { color: '#8b949e' },
+            min: yMin, max: yMax
+          }
+        }
+      }
+    });
+    charts[key] = chart;
+    return chart;
+  }
+
+  function makeDs(label, data, color) {
+    return { label: label, data: data, borderColor: color, borderWidth: 1.8, pointRadius: 0, pointHitRadius: 5, tension: 0.1 };
+  }
+
+  // ==================== API ====================
+  function apiGet(path) {
+    return fetch(API_BASE + path)
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .catch(function(e) { showError('API ' + path + ': ' + e.message); return null; });
+  }
+
+  // ==================== Render ====================
+  function renderSummary(exps) {
+    var active = exps.filter(function(e) { return e.is_active; });
+    var done = exps.filter(function(e) { return !e.is_active; });
+    var bestS = { arch: '--', v: 0 }, bestE = { arch: '--', v: 0 };
+    exps.forEach(function(e) {
+      if (e.best_sing.value > bestS.v) { bestS = { arch: e.arch, v: e.best_sing.value }; }
+      if (e.best_edge.value > bestE.v) { bestE = { arch: e.arch, v: e.best_edge.value }; }
+    });
+    var totalEp = exps.reduce(function(s, e) { return s + e.current_epoch; }, 0);
+
+    document.getElementById('summaryCards').innerHTML =
+      '<div class="card"><div class="label">Active</div><div class="value green">' + active.length + '</div><div class="sub">' + active.map(function(e){return e.arch;}).join(', ') + '</div></div>' +
+      '<div class="card"><div class="label">Completed</div><div class="value accent">' + done.length + '</div><div class="sub">' + done.map(function(e){return e.arch;}).join(', ') + '</div></div>' +
+      '<div class="card"><div class="label">Best Sing Dice</div><div class="value purple">' + bestS.v.toFixed(4) + '</div><div class="sub">' + bestS.arch + '</div></div>' +
+      '<div class="card"><div class="label">Best Edge Dice</div><div class="value orange">' + bestE.v.toFixed(4) + '</div><div class="sub">' + bestE.arch + '</div></div>' +
+      '<div class="card"><div class="label">Total Epochs</div><div class="value accent">' + totalEp + '</div><div class="sub">' + exps.length + ' experiments</div></div>';
+  }
+
+  function renderExpList(exps) {
+    var html = '';
+    if (exps.length === 0) {
+      html = '<div style="padding:24px;text-align:center;color:var(--text-dim);">No experiments found. Waiting...</div>';
+    } else {
+      exps.forEach(function(exp) {
+        var badgeCls = exp.arch.toLowerCase().indexOf('gat') >= 0 ? 'badge-gat' :
+                       exp.arch.toLowerCase().indexOf('gcn') >= 0 ? 'badge-gcn' :
+                       exp.arch.toLowerCase().indexOf('sage') >= 0 ? 'badge-sage' :
+                       exp.arch.toLowerCase().indexOf('phys') >= 0 ? 'badge-phys' : 'badge-gat';
+        if (!exp.is_active) badgeCls = 'badge-done';
+        var progCls = exp.is_active ? 'active' : 'done';
+        var tagCls = exp.is_active ? 'tag-active' : 'tag-done';
+        var tagText = exp.is_active ? 'RUNNING' : 'DONE';
+        var selCls = exp.id === selectedExpId ? ' selected' : '';
+        var lm = exp.last_metrics;
+        html += '<div class="exp-row' + selCls + '" data-id="' + exp.id + '" onclick="window._selectExp(\'' + exp.id + '\')">' +
+          '<span class="arch-badge ' + badgeCls + '">' + exp.arch + '</span>' +
+          '<div class="info"><div class="title">' + exp.name + '</div>' +
+          '<div class="detail">Sing: ' + lm.sing_dice.toFixed(4) + ' | Edge: ' + lm.edge_dice.toFixed(4) + ' | Best Sing: ' + exp.best_sing.value.toFixed(4) + ' (E' + exp.best_sing.epoch + ') | Best Edge: ' + exp.best_edge.value.toFixed(4) + ' (E' + exp.best_edge.epoch + ')</div></div>' +
+          '<div class="progress-wrap"><div class="progress-outer"><div class="progress-inner ' + progCls + '" style="width:' + exp.progress_pct + '%;"></div></div></div>' +
+          '<span class="pct">' + Math.round(exp.progress_pct) + '%</span>' +
+          '<span class="tag ' + tagCls + '">' + tagText + '</span></div>';
+      });
+    }
+    document.getElementById('expList').innerHTML = html;
+  }
+
+  function renderCompare(exps) {
+    var sorted = exps.slice().sort(function(a, b) { return b.best_sing.value - a.best_sing.value; });
+    var rows = '';
+    sorted.forEach(function(exp, i) {
+      var rankCls = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : 'rank-3';
+      var rowCls = i === 0 ? ' class="best"' : '';
+      var lm = exp.last_metrics;
+      var statusHtml = exp.is_active ? '<span class="tag tag-active">ACTIVE</span>' : '<span class="tag tag-done">DONE</span>';
+      rows += '<tr' + rowCls + '>' +
+        '<td><span class="rank-badge ' + rankCls + '">' + (i+1) + '</span></td>' +
+        '<td><strong>' + exp.arch + '</strong></td><td>' + exp.name + '</td>' +
+        '<td>' + exp.current_epoch + '/' + exp.total_epochs + '</td>' +
+        '<td>' + lm.sing_auc.toFixed(4) + '</td>' +
+        '<td style="color:var(--purple);font-weight:600;">' + exp.best_sing.value.toFixed(4) + '</td>' +
+        '<td>' + lm.edge_auc.toFixed(4) + '</td>' +
+        '<td style="color:var(--orange);font-weight:600;">' + exp.best_edge.value.toFixed(4) + '</td>' +
+        '<td>' + lm.m1_dice.toFixed(4) + '</td>' +
+        '<td>' + lm.m2_dice.toFixed(4) + '</td>' +
+        '<td>' + statusHtml + '</td></tr>';
+    });
+    document.getElementById('compareTable').innerHTML =
+      '<thead><tr><th>#</th><th>Arch</th><th>Experiment</th><th>Epoch</th><th>Sing AUC</th><th>Sing Dice</th><th>Edge AUC</th><th>Edge Dice</th><th>M1 Dice</th><th>M2 Dice</th><th>Status</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody>';
+  }
+
+  function renderCharts(expId) {
+    if (!expId) return;
+    document.getElementById('chartExpName').textContent = 'loading...';
+
+    apiGet('/api/metrics?id=' + encodeURIComponent(expId)).then(function(metrics) {
+      if (!metrics || metrics.length === 0) return;
+
+      var labels = metrics.map(function(m) { return m.epoch; });
+      var exp = experiments.find(function(e) { return e.id === expId; });
+      document.getElementById('chartExpName').textContent = exp ? exp.name : expId;
+
+      // Main chart: current view
+      var view = document.querySelector('.chart-tab.active');
+      view = view ? view.dataset.view : 'loss';
+      renderMain(labels, metrics, view);
+
+      // Small fixed charts
+      makeChart('lossChart', [
+        makeDs('D Loss', metrics.map(function(m){return m.d_loss;}), COLORS.d_loss),
+        makeDs('G Loss', metrics.map(function(m){return m.g_loss;}), COLORS.g_loss)
+      ], 'Loss', 0);
+
+      makeChart('reconChart', [
+        makeDs('Recon', metrics.map(function(m){return m.recon;}), COLORS.recon),
+        makeDs('Adv', metrics.map(function(m){return m.adv;}), COLORS.adv)
+      ], 'Value');
+
+      makeChart('r1Chart', [
+        makeDs('R1 Penalty', metrics.map(function(m){return m.r1;}), COLORS.r1)
+      ], 'Value', 0);
+
+    }).catch(function(e) { showError('renderCharts: ' + e.message); });
+  }
+
+  function renderMain(labels, metrics, view) {
+    var ds;
+    var yMin, yMax;
+    switch (view) {
+      case 'loss':
+        ds = [
+          makeDs('D Loss', metrics.map(function(m){return m.d_loss;}), COLORS.d_loss),
+          makeDs('G Loss', metrics.map(function(m){return m.g_loss;}), COLORS.g_loss),
+          makeDs('Recon', metrics.map(function(m){return m.recon;}), COLORS.recon),
+          makeDs('Adv', metrics.map(function(m){return m.adv;}), COLORS.adv)
+        ];
+        yMin = 0;
+        break;
+      case 'sing':
+        ds = [
+          makeDs('Sing AUC', metrics.map(function(m){return m.sing_auc;}), COLORS.sing_auc),
+          makeDs('Sing Dice', metrics.map(function(m){return m.sing_dice;}), COLORS.sing_dice)
+        ];
+        yMin = 0; yMax = 1;
+        break;
+      case 'edge':
+        ds = [
+          makeDs('Edge AUC', metrics.map(function(m){return m.edge_auc;}), COLORS.edge_auc),
+          makeDs('Edge Dice', metrics.map(function(m){return m.edge_dice;}), COLORS.edge_dice)
+        ];
+        yMin = 0; yMax = 1;
+        break;
+      case 'm1m2':
+        ds = [
+          makeDs('M1 AUC', metrics.map(function(m){return m.m1_auc;}), COLORS.m1_auc),
+          makeDs('M1 Dice', metrics.map(function(m){return m.m1_dice;}), COLORS.m1_dice),
+          makeDs('M2 AUC', metrics.map(function(m){return m.m2_auc;}), COLORS.m2_auc),
+          makeDs('M2 Dice', metrics.map(function(m){return m.m2_dice;}), COLORS.m2_dice)
+        ];
+        yMin = 0; yMax = 1;
+        break;
+    }
+    makeChart('mainChart', ds, view, yMin, yMax);
+  }
+
+  // ==================== Public handlers ====================
+  window._selectExp = function(expId) {
+    selectedExpId = expId;
+    renderExpList(experiments);
+    renderCharts(expId);
+  };
+
+  // ==================== Main ====================
+  function refresh() {
+    apiGet('/api/experiments').then(function(exps) {
+      if (!exps) return;
+      experiments = exps;
+      clearError();
+
+      renderSummary(exps);
+      renderExpList(exps);
+      renderCompare(exps);
+
+      // Auto-select
+      if (!selectedExpId && exps.length > 0) {
+        var active = exps.find(function(e) { return e.is_active; });
+        selectedExpId = active ? active.id : exps[0].id;
+      }
+
+      // Update charts
+      if (selectedExpId) renderCharts(selectedExpId);
+
+      // Status
+      var activeCount = exps.filter(function(e) { return e.is_active; }).length;
+      var dot = document.getElementById('statusDot');
+      dot.className = activeCount > 0 ? 'dot' : 'dot idle';
+      document.getElementById('statusText').textContent = activeCount > 0 ? activeCount + ' running' : (exps.length > 0 ? 'All done' : 'Waiting...');
+      document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+    }).catch(function(e) { showError('refresh: ' + e.message); });
+    countdown = REFRESH_MS / 1000;
+  }
+
+  // Tab click handler
+  document.getElementById('chartTabs').addEventListener('click', function(e) {
+    if (!e.target.classList.contains('chart-tab')) return;
+    var tabs = document.querySelectorAll('.chart-tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+    e.target.classList.add('active');
+    if (selectedExpId) renderCharts(selectedExpId);
+  });
+
+  // Countdown
+  setInterval(function() {
+    countdown = Math.max(0, countdown - 1);
+    document.getElementById('countdown').textContent = countdown + 's';
+  }, 1000);
+
+  // Auto-refresh
+  setInterval(refresh, REFRESH_MS);
+
+  // Init
+  refresh();
+})();
+</script>
+</body>
+</html>

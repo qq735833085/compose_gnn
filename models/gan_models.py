@@ -130,6 +130,9 @@ class DiscriminatorGNN(nn.Module):
         elif gnn_type == 'gcn':
             self.conv1 = GCNConv(total_input_dim, hidden_dim)
             self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        elif gnn_type == 'sage':
+            self.conv1 = SAGEConv(total_input_dim, hidden_dim)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
         else:
             raise ValueError(f"Unknown gnn_type: {gnn_type}")
 
