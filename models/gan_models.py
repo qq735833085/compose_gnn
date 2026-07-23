@@ -203,6 +203,119 @@ class DiscriminatorGNN(nn.Module):
         return score
 
 
+# ============================= Edge-Aware Discriminator =============================
+
+class EdgeAwareDiscriminatorGNN(nn.Module):
+    """
+    边感知判别器：在全局池化中显式加入边特征的 mean+max pooling，
+    使边预测获得直接梯度路径（而不仅是通过 GAT attention 间接影响）。
+
+    与 DiscriminatorGNN 的核心区别：
+      edge_labels → global edge pool → concat(node_pool, edge_pool) → score
+                                    ↑ 边预测获得直通梯度
+
+    架构：
+      GNN (2层) → node pool (mean+max) ⊕ edge pool (mean+max) → MLP → score
+    """
+
+    def __init__(self, input_dim=12, node_label_dim=1, hidden_dim=128,
+                 gnn_type='gat', dropout=0.2):
+        super().__init__()
+        self.node_label_dim = node_label_dim
+        total_input_dim = input_dim + node_label_dim  # 12 + 1 = 13
+
+        # ---- GNN Encoder (与 DiscriminatorGNN 相同) ----
+        if gnn_type == 'gat':
+            self.conv1 = GATv2Conv(total_input_dim, hidden_dim, heads=4, concat=False,
+                                   edge_dim=2, dropout=dropout)
+            self.conv2 = GATv2Conv(hidden_dim, hidden_dim, heads=4, concat=False,
+                                   edge_dim=2, dropout=dropout)
+        elif gnn_type == 'gcn':
+            self.conv1 = GCNConv(total_input_dim, hidden_dim)
+            self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        elif gnn_type == 'sage':
+            self.conv1 = SAGEConv(total_input_dim, hidden_dim)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+        else:
+            raise ValueError(f"Unknown gnn_type: {gnn_type}")
+
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
+
+        # ---- 分类头：node pool (hidden*2) + edge pool (2*2) = hidden*2 + 4 ----
+        classifier_input_dim = hidden_dim * 2 + 4  # ★ 多了 4 维边池化
+        self.classifier = nn.Sequential(
+            nn.Linear(classifier_input_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+        self.dropout_rate = dropout
+
+    def forward(self, data, node_labels, edge_labels):
+        """
+        Args:
+            data: PyG Data with x [N,12], edge_index [2,2E], batch [N]
+            node_labels: [N, 1] — 真实或生成的节点概率
+            edge_labels: [2E, 2] — 真实或生成的边概率 [m1, m2]
+        Returns:
+            score: [B, 1] — 真实度评分
+        """
+        x, edge_index = data.x, data.edge_index
+        batch = data.batch if hasattr(data, 'batch') else None
+
+        # ---- GNN 编码（与 DiscriminatorGNN 相同）----
+        h = torch.cat([x, node_labels], dim=-1)  # [N, 13]
+
+        if hasattr(self.conv1, 'edge_dim') and self.conv1.edge_dim is not None:
+            edge_attr = edge_labels
+            h = self.conv1(h, edge_index, edge_attr)
+        else:
+            h = self.conv1(h, edge_index)
+
+        h = self.bn1(h)
+        h = F.leaky_relu(h, 0.2)
+        h = F.dropout(h, p=self.dropout_rate, training=self.training)
+
+        if hasattr(self.conv2, 'edge_dim') and self.conv2.edge_dim is not None:
+            h = self.conv2(h, edge_index, edge_attr)
+        else:
+            h = self.conv2(h, edge_index)
+
+        h = self.bn2(h)
+        h = F.leaky_relu(h, 0.2)
+
+        # ---- 节点池化 ----
+        if batch is None:
+            node_mean = h.mean(dim=0, keepdim=True)
+            node_max = h.max(dim=0, keepdim=True)[0]
+        else:
+            node_mean = global_mean_pool(h, batch)
+            node_max = global_max_pool(h, batch)
+
+        # ---- ★ 边池化（新增）----
+        # 对 edge_labels [2E, 2] 做全局池化，每条边 2 个 channel (m1, m2)
+        if batch is not None:
+            # 需要 edge_batch：每条边所属的图
+            # edge_index[0] 是源节点，通过 node batch 映射到图
+            edge_batch = batch[edge_index[0]]
+            edge_mean = global_mean_pool(edge_labels, edge_batch)  # [B, 2]
+            edge_max = global_max_pool(edge_labels, edge_batch)    # [B, 2]
+        else:
+            edge_mean = edge_labels.mean(dim=0, keepdim=True)      # [1, 2]
+            edge_max = edge_labels.max(dim=0, keepdim=True)[0]     # [1, 2]
+
+        edge_pool = torch.cat([edge_mean, edge_max], dim=-1)       # [B, 4]
+
+        # ---- 联合池化 + 分类 ----
+        h_pool = torch.cat([node_mean, node_max, edge_pool], dim=-1)  # [B, H*2+4]
+        score = self.classifier(h_pool)  # [B, 1]
+        return score
+
+
 # ============================= 改进版 Generator (v4) =============================
 
 class GeneratorGNNv4(nn.Module):

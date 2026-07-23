@@ -556,3 +556,38 @@ Generator 重建损失：`L1 → MultiTaskStressLoss(Focal + Dice)`
 5. **检查 Exp7 Pure GAT 的 best checkpoint** — 确认 Edge 指标是否已收敛
 
 ---
+
+## 🔄 实验重启：BS=2 + BS=1 并行对比（2026-07-22 17:00）
+
+**目的**：完成被中断的实验 7-10，并以 batch_size=2 和 batch_size=1 两组平行运行对比效果。
+
+**改进**：
+- 所有脚本添加 `--batch_size`, `--epochs`, `--seed` 命令行参数
+- 支持 `--resume <dir>` 从中断恢复
+- Checkpoint 每 50 epochs 保存（含 optimizer/scheduler 状态）
+
+### 运行矩阵
+
+| 批次 | BS | 实验 | 预期耗时 |
+|------|-----|------|---------|
+| Batch 1 | 2 | Exp7 Pure GAT + Exp8 Edge-Aware + Exp9 Focal+Dice + Exp10 Combined | ~5h |
+| Batch 2 | 1 | 同上 | ~10h |
+
+### 运行配置
+
+| 参数 | BS=2 | BS=1 |
+|------|------|------|
+| GPU | A10 24GB | A10 24GB |
+| 并发数 | 4 (21.6GB/23GB) | 4 (预计 ~12GB) |
+| Train batches | 90 | 180 |
+| 每 epoch 耗时 (GAN) | ~60s | ~120s |
+| 每 epoch 耗时 (Pure GAT) | ~15s | ~30s |
+
+### 启动时间
+- **BS=2 Batch**: 2026-07-22 16:59 CST
+- **BS=1 Batch**: 待 BS=2 完成后自动启动
+
+### 状态：🔄 BS=2 运行中
+
+---
+

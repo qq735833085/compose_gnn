@@ -28,7 +28,7 @@ if sys.platform == 'win32':
         pass
 
 # ===================== 配置 =====================
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent  # 项目根目录
 COMPARE_DIR = BASE_DIR / "trained_model" / "v5_compare"
 PHYSICS_DIR = BASE_DIR / "trained_model" / "v5_physics"
 

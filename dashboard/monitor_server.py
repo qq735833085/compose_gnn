@@ -15,7 +15,7 @@ from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent  # 项目根目录
 COMPARE_DIR = BASE_DIR / "trained_model" / "v5_compare"
 PHYSICS_DIR = BASE_DIR / "trained_model" / "v5_physics"
 
